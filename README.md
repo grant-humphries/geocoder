@@ -1,0 +1,1 @@
+This repo contains files that assist in the development of inputs for a SOLR based geocoder.  It may expand to include code that is part of the creation of the geocoder itself.
