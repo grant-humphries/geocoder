@@ -17,13 +17,13 @@ create temp table intersection_points as
 			and n.id = wn.node_id
 			and wn.way_id = wt.way_id
 			and wt.k = 'name'
-		group by n.geom, n.id, wn.way_id, wt.v
+		group by n.geom, n.id, wn.way_id, wt.v;
 
 --Add alternate names stored in the 'name_1' and 'alt_name' into the intersection_points table
 --From the intersections table grab only node id's that are a part of a way with a 'name_1' tag
 create temp table named_intersections_n1 as
 	select node_id 
-	from intersections i
+	from named_intersections i
 	where exists (select null 
 					from osm.way_nodes wn, osm.way_tags wt
 					where i.node_id = wn.node_id
@@ -38,12 +38,12 @@ insert into intersection_points
 			and n.id = wn.node_id
 			and wn.way_id = wt.way_id
 			and wt.k = 'name_1'
-		group by n.geom, n.id, wn.way_id, wt.v
+		group by n.geom, n.id, wn.way_id, wt.v;
 
 --Repeat the 'name_1' steps for 'alt_name'
 create temp table named_intersections_an as
 	select node_id 
-	from intersections i
+	from named_intersections i
 	where exists (select null 
 					from osm.way_nodes wn, osm.way_tags wt
 					where i.node_id = wn.node_id
@@ -57,21 +57,28 @@ insert into intersection_points
 			and n.id = wn.node_id
 			and wn.way_id = wt.way_id
 			and wt.k = 'alt_name'
-		group by n.geom, n.id, wn.way_id, wt.v
+		group by n.geom, n.id, wn.way_id, wt.v;
 
---Join nodes, if they have different names and are on different ways, based on their node id to create 
+create index int_points_way_id_ix on intersection_points using btree(way_id);
+create index int_points_name_ix on intersection_points using btree(name);
+
+--Join nodes, if the ways they are from don't share any common names, based on their node id to create 
 --cross street pairs
 drop table if exists osm.cross_streets cascade;
 create table osm.cross_streets with oids as
 	select ST_X(ip1.geom) as x, ST_Y(ip1.geom) as y, ip1.node_id, ip1.name as street_1, ip2.name as street_2
 		from intersection_points ip1, intersection_points ip2
 		where ip1.node_id = ip2.node_id
-			and ip1.name != ip2.name
-			and ip1.way_id != ip2.way_id
+			and ip1.name not in (select name 
+								from intersection_points
+								where way_id = ip2.way_id )
+		group by ip1.geom, ip1.node_id, ip1.name, ip2.name
 		order by ip1.name, ip2.name;
 
---drop temporary tables
+--Drop temporary tables
 drop table named_intersections;
 drop table named_intersections_n1;
 drop table named_intersections_an;
 drop table intersection_points;
+
+--Ran in 32,161 ms on 3/13/14
