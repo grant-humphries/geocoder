@@ -1,6 +1,6 @@
 --add spatial index on cross streets geometry column
-drop index if exists osm.cross_streets_geom_idx cascade;
-create index cross_streets_geom_idx on osm.cross_streets using GIST(geom);
+drop index if exists osm.cross_streets_gx cascade;
+create index cross_streets_gx on osm.cross_streets using GIST(geom);
 
 alter table osm.cross_streets drop column if exists city cascade;
 alter table osm.cross_streets add city text;
