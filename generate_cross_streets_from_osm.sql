@@ -66,7 +66,7 @@ create index int_points_name_ix on intersection_points using btree(name);
 --cross street pairs
 drop table if exists osm.cross_streets cascade;
 create table osm.cross_streets with oids as
-	select ST_X(ip1.geom) as x, ST_Y(ip1.geom) as y, ip1.node_id, ip1.name as street_1, ip2.name as street_2
+	select ST_Transform(ip1.geom, 2913) as geom, ST_X(ip1.geom) as x, ST_Y(ip1.geom) as y, ip1.node_id, ip1.name as street_1, ip2.name as street_2
 		from intersection_points ip1, intersection_points ip2
 		where ip1.node_id = ip2.node_id
 			and ip1.name not in (select name 
@@ -81,4 +81,8 @@ drop table named_intersections_n1;
 drop table named_intersections_an;
 drop table intersection_points;
 
---Ran in 32,161 ms on 3/13/14
+--Ran in 50,466 ms on 3/17/14
+
+--After this script runs the following command needs to be executed in order for the table to be further modified
+--ALTER TABLE osm.cross_streets OWNER TO tmpublic;
+--Note that the command above won't work in the psql window without the semi-colon
