@@ -1,3 +1,8 @@
+--Grant Humphries for TriMet, 2014
+--PostGIS Version: 2.1
+--PostGreSQL Version: 9.3
+---------------------------------
+
 --Create a list of node id's for all nodes that are a part two or more ways that all have a tag
 --with the key 'name'
 create temp table named_intersections as

@@ -1,3 +1,8 @@
+--Grant Humphries for TriMet, 2014
+--PostGIS Version: 2.1
+--PostGreSQL Version: 9.3
+---------------------------------
+
 --add spatial index on cross streets geometry column
 drop index if exists osm.cross_streets_gx cascade;
 create index cross_streets_gx on osm.cross_streets using GIST(geom);
