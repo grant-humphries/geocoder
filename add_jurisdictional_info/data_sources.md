@@ -1,5 +1,5 @@
 #Data Sources
-for Intersection City, County, and Zip Code Attributes.  The bounding box for which coverage is needed is , this area extends south past Salem and North past Vancouver.  Data sets are listed in order of percieved accuracy and features will only be utilized from sources lower in the list if they are not present in the items above.
+for Intersection City, County, and Zip Code Attributes.  The bounding box for which coverage is needed is 44.68000, -123.80000, 45.80000, -121.50000 (in lat, lon), this area extends south past Salem and North past Vancouver.  Data sets are listed in order of percieved accuracy and features will only be utilized from sources lower in the list if they are not present in the items above.
 
 ##City Boundaries
 | Source | Name (linked to metadata) | Coverage Area |
