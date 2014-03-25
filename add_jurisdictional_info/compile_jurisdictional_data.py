@@ -38,9 +38,6 @@ osm_b_box_state_plane = osm_b_box.projectAs(oregonStatePlane)
 b_box_fc = 'in_memory/osm_b_box'
 arcpy.management.CopyFeatures(osm_b_box_state_plane, b_box_fc)
 
-b_box_layer = 'osm_b_box_layer'
-arcpy.management.MakeFeatureLayer(b_box_fc, b_box_layer)
-
 # Assign city, county, zip datasets to variables
 rlis_cities = '//gisstore/gis/RLIS/BOUNDARY/cty_fill.shp'
 oregon_cities = os.path.join(env.workspace, 'statewide_data/oregon_citylim_2010.shp')
@@ -51,74 +48,81 @@ rlis_zips = '//gisstore/gis/RLIS/BOUNDARY/zipcode.shp'
 oregon_zips = os.path.join(env.workspace, 'statewide_data/ORE_zipcodes.shp')
 or_wa_tiger_zips = os.path.join(env.workspace, 'statewide_data/or_wa_zip_code_tab_areas_tiger10.shp')
 
-def trimAndReproject(dataset, name):
-	# Check to see if the input dataset is in the Oregon State Plane North Projection, if it is not reproject it
-	# to that spatial reference
-	desc = arcpy.Describe(dataset)
-	if desc.spatialReference.factoryCode != 2913:
-		spatial_ref = arcpy.SpatialReference(2913)
-		dataset_2913 = os.path.join(env.workspace, 'data/temp/' + name + '_2913.shp')
-		arcpy.management.Project(dataset, dataset_2913, spatial_ref)
-		dataset = dataset_2913
+def renameField(fc, old_name, new_name):
+	desc = arcpy.Describe(fc)
+	if old_name in [field.name for field in desc.fields]:
+		# As described here http://resources.arcgis.com/en/help/main/10.2/index.html#//018z0000004n000000, not all
+		# values return by the field objects 'type' parameter map to inputs for arcpy, this dictionary corrects
+		field_type_dict = {'Integer': 'LONG', 'String': 'TEXT', 'SmallInteger':'SHORT'}
 
-	# Get rid of any features that aren't within the OSM bounding box defined above
-	dataset_layer = name + '_layer'
-	arcpy.management.MakeFeatureLayer(dataset, dataset_layer)
+		for field in desc.fields:
+			if old_name == field.name:
+				if field.type in field_type_dict:
+					f_type = field_type_dict[field.type]
+					break
+				else:
+					f_type = field.type
+					break
 
-	spatial_relationship = 'INTERSECT'
-	st = 'NEW_SELECTION'
-	arcpy.management.SelectLayerByLocation(dataset_layer, spatial_relationship, b_box_layer, selection_type=st)
+		arcpy.management.AddField(fc, new_name, f_type)
 
-	b_box_feats = 'in_memory/' + name + '_b_box_feats'
-	arcpy.management.CopyFeatures(dataset_layer, b_box_feats)
+		fields = [old_name, new_name]
+		with arcpy.da.UpdateCursor(fc, fields) as cursor:
+			for o_name, n_name in cursor:
+				n_name = o_name
+				cursor.updateRow((o_name, n_name))
+		
+		arcpy.management.DeleteField(fc, old_name)
 
-	# Delete in memory layers that are no longer needed, note that first feature class will only exist if 
-	# the input dataset was not in Oregon State Plane North projection
-	#arcpy.management.DeleteFeatures(dataset_layer)
+	else:
+		print 'The field: ' + old_name + ' does not exist in the input feature class'
 
-	return b_box_feats
+or_cty_old_name = 'CITY_NAME'
+or_cty_name = 'name_or_ci'
+renameField(oregon_cities, or_cty_old_name, or_cty_name)
 
-# Cities/Counties layer
-rlis_cities_trim = trimAndReproject(rlis_cities, 'rlis_cities')
-or_cities_trim = trimAndReproject(oregon_cities, 'or_cities')
-wa_cities_trim = trimAndReproject(washington_cities, 'wa_cities')
+wa_cty_old_name = 'NAME'
+wa_cty_name = 'name_wa_ci'
+renameField(washington_cities, wa_cty_old_name, wa_cty_name)
 
-# Create a new feature class to hold the merged cities layers
-or_wa_cities = os.path.join(env.workspace, 'data/or_wa_cities.shp')
-geom_type = 'POLYGON'
-projection = arcpy.SpatialReference(2913)
-arcpy.management.CreateFeatureclass(os.path.dirname(or_wa_cities), os.path.basename(or_wa_cities), geom_type, 
-										spatial_reference=projection)
+tiger_co_old_name = 'NAME'
+tiger_co_name = 'name_tg_co'
+renameField(or_wa_tiger_counties, tiger_co_old_name, tiger_co_name)
 
-f_name = 'Name'
-f_type = 'TEXT'
-arcpy.management.AddField(or_wa_cities, f_name, f_type)
+# Union city and county limit data into a single layer
+cty_co_union_feats = [[rlis_cities, 1], [oregon_cities, 2], [washington_cities, 3], 
+						[rlis_counties, 4], [or_wa_tiger_counties, 5]]
+cty_co_union = 'in_memory/cty_co_union'
+arcpy.analysis.Union(cty_co_union_feats, cty_co_union)
 
-drop_field = 'Id'
-arcpy.management.DeleteField(or_wa_cities, drop_field)
+# Clip the union layer to only cover the extent of the OSM bounding box defined above
+cty_co_union_clip = 'in_memory/cty_co_union_clip'
+arcpy.analysis.Clip(cty_co_union, b_box_fc, cty_co_union_clip)
 
-i_fields = ['SHAPE@', 'Name'] 
-i_cursor = arcpy.da.InsertCursor(or_wa_cities, i_fields)
+# Name field is 'CITYNAME' for rlis cities and 'COUNTY' for rlis counties.  The name field for all other inputs has 
+# been modified to be unique and stored in a variable above
+rlis_cty_name = 'CITYNAME'
+rlis_co_name = 'COUNTY'
+fields = [rlis_cty_name, or_cty_name, wa_cty_name, rlis_co_name, tiger_co_name]
+with arcpy.da.UpdateCursor(cty_co_union_clip, fields) as cursor:
+	for final_name, or_cty, wa_cty, rlis_co, tiger_co in cursor:
+		if final_name == '':
+			if or_cty != '':
+				final_name = or_cty
+			elif wa_cty != '':
+				final_name = wa_cty
+			elif rlis_co != '':
+				final_name = rlis_co + ' County'
+			elif tiger_co != '':
+				final_name = tiger_co + ' County'
 
-# First insert rlis cities, this is the most accurate and up-to-date of the three datasets that contains cities
-cities_list = []
-fields = ['SHAPE@', 'CITYNAME']
-with arcpy.da.SearchCursor(rlis_cities_trim, fields) as cursor:
-	for geom, name in cursor:
-		i_cursor.insertRow((geom, name))
-		cities_list.append(name)
+			cursor.updateRow((final_name, or_cty, wa_cty, rlis_co, tiger_co))
 
-fields = ['SHAPE@', 'CITY_NAME']
-with arcpy.da.SearchCursor(or_cities_trim, fields) as cursor:
-	for geom, name in cursor:
-		if name not in cities_list:
-			i_cursor.insertRow((geom, name))
-			cities_list.append(name)
+# Change the name of the 'CITYNAME' column because it no longer holds values for just the rlis cities layer, but
+# rather names for cities and counties across the whole region
+region_name = 'reg_name'
+renameField(cty_co_union_clip, rlis_cty_name, region_name)
 
-fields = ['SHAPE@', 'NAME']
-with arcpy.da.SearchCursor(wa_cities_trim, fields) as cursor:
-	for geom, name in cursor:
-		if name not in cities_list:
-			i_cursor.insertRow((geom, name))
-
-del i_cursor
+city_county_final = os.path.join(env.workspace, 'data/or_wa_city_county.shp')
+dissolve_field = region_name
+arcpy.management.Dissolve(cty_co_union_clip, city_county_final, dissolve_field)
