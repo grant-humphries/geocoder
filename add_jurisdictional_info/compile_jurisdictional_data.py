@@ -56,10 +56,10 @@ b_box_fc = 'in_memory/osm_b_box'
 arcpy.management.CopyFeatures(osm_b_box_state_plane, b_box_fc)
 
 # Assign city, county, zip datasets to variables
-rlis_cities = '//gisstore/gis/RLIS/BOUNDARY/cty_fill.shp'
+rlis_cities_read_only = '//gisstore/gis/RLIS/BOUNDARY/cty_fill.shp'
 oregon_cities = os.path.join(env.workspace, 'statewide_data/oregon_citylim_2010.shp')
 washington_cities = os.path.join(env.workspace, 'statewide_data/washington_cities.shp')
-rlis_counties = '//gisstore/gis/RLIS/BOUNDARY/co_fill.shp'
+rlis_counties_read_only = '//gisstore/gis/RLIS/BOUNDARY/co_fill.shp'
 or_wa_tiger_counties = os.path.join(env.workspace, 'statewide_data/or_wa_counties_tiger13.shp')
 
 # Rename a field in a shapefile
@@ -97,22 +97,36 @@ def renameField(fc, old_name, new_name, num2str=False):
 		arcpy.management.DeleteField(fc, old_name)
 
 	else:
+		print 'renameField Error:'
 		print 'The field: ' + old_name + ' does not exist in the input feature class'
 
 # 1) Merge city and county data into a single layer
 
-# Rename 'name' fields on input datasets so that they are unique amongst each other
-or_cty_old_name = 'CITY_NAME'
-or_cty_name = 'name_or_ci'
-renameField(oregon_cities, or_cty_old_name, or_cty_name)
+# Assign city and county datasets to variables
+rlis_cities_read_only = '//gisstore/gis/RLIS/BOUNDARY/cty_fill.shp'
+oregon_cities = os.path.join(env.workspace, 'statewide_data/oregon_citylim_2010.shp')
+washington_cities = os.path.join(env.workspace, 'statewide_data/washington_cities.shp')
+rlis_counties_read_only = '//gisstore/gis/RLIS/BOUNDARY/co_fill.shp'
+or_wa_tiger_counties = os.path.join(env.workspace, 'statewide_data/or_wa_counties_tiger13.shp')
 
-wa_cty_old_name = 'NAME'
-wa_cty_name = 'name_wa_ci'
-renameField(washington_cities, wa_cty_old_name, wa_cty_name)
+# rlis data is read only and needs to be modified thus the copies that are created below
+rlis_cities = 'in_memory/rlis_cities'
+arcpy.management.CopyFeatures(rlis_cities_read_only, rlis_cities)
 
-tiger_co_old_name = 'NAME'
-tiger_co_name = 'name_tg_co'
-renameField(or_wa_tiger_counties, tiger_co_old_name, tiger_co_name)
+rlis_counties = 'in_memory/rlis_counties'
+arcpy.management.CopyFeatures(rlis_counties_read_only, rlis_counties)
+
+# Rename 'name' fields on input datasets so that they are unique amongst each other easily identifiable
+rename_list = [(rlis_cities, 'CITYNAME', 'rlis_city'), 
+				(oregon_cities, 'CITY_NAME', 'or_city'),
+				(washington_cities, 'NAME', 'wa_city'), 
+				(rlis_counties, 'COUNTY', 'rlis_cnty'),
+				(or_wa_tiger_counties, 'NAME','tiger_cnty')]
+
+name_fields = []
+for fc, old_name, new_name in rename_list:
+	renameField(fc, old_name, new_name)
+	name_fields.append(new_name)
 
 # Union city and county limit data into a single layer
 cty_co_union_feats = [[rlis_cities, 1], [oregon_cities, 2], [washington_cities, 3], 
@@ -124,30 +138,27 @@ arcpy.analysis.Union(cty_co_union_feats, cty_co_union)
 cty_co_union_clip = 'in_memory/cty_co_union_clip'
 arcpy.analysis.Clip(cty_co_union, b_box_fc, cty_co_union_clip)
 
-# Name field is 'CITYNAME' for rlis cities and 'COUNTY' for rlis counties.  The name field for all other inputs has 
-# been modified to be unique and stored in a variable above
-# Using the established heirarchy amongst the datasets consolidate all of the city/county names into a single field
-rlis_cty_name = 'CITYNAME'
-rlis_co_name = 'COUNTY'
-fields = [rlis_cty_name, or_cty_name, wa_cty_name, rlis_co_name, tiger_co_name]
-with arcpy.da.UpdateCursor(cty_co_union_clip, fields) as cursor:
-	for final_name, or_cty, wa_cty, rlis_co, tiger_co in cursor:
-		if final_name == '':
-			if or_cty != '':
-				final_name = or_cty
-			elif wa_cty != '':
-				final_name = wa_cty
-			elif rlis_co != '':
-				final_name = rlis_co + ' County'
-			elif tiger_co != '':
-				final_name = tiger_co + ' County'
-
-			cursor.updateRow((final_name, or_cty, wa_cty, rlis_co, tiger_co))
-
-# Change the name of the 'CITYNAME' column because it no longer holds values for just the rlis cities layer, but
-# rather names for cities and counties across the whole region
+# Add a new field to store the final name that will be used for each of the features in the union dataset
 region_name = 'reg_name'
-renameField(cty_co_union_clip, rlis_cty_name, region_name)
+f_type = 'TEXT'
+arcpy.management.AddField(cty_co_union_clip, region_name, f_type)
+
+# Using the established heirarchy amongst the datasets consolidate all of the city/county names into a single field
+fields = [region_name] + name_fields
+with arcpy.da.UpdateCursor(cty_co_union_clip, fields) as cursor:
+	for final_name, rlis_cty, or_cty, wa_cty, rlis_co, tiger_co in cursor:
+		if rlis_cty != '':
+			final_name = rlis_cty
+		elif or_cty != '':
+			final_name = or_cty
+		elif wa_cty != '':
+			final_name = wa_cty
+		elif rlis_co != '':
+			final_name = rlis_co + ' County'
+		elif tiger_co != '':
+			final_name = tiger_co + ' County'
+
+		cursor.updateRow((final_name, rlis_cty, or_cty, wa_cty, rlis_co, tiger_co))
 
 # Dissolve city/county boundaries based on the unified 'reg_name' field
 city_county_final = os.path.join(env.workspace, 'data/or_wa_city_county.shp')
@@ -170,12 +181,12 @@ arcpy.management.CopyFeatures(rlis_zips_read_only, rlis_zips)
 # the rlis zip field is of type int while all other zip data has their corresponding fields as string
 # I'm converting the rlis zip field to string here for compatibility
 rlis_zip_old_field = 'ZIPCODE'
-rlis_zip_field = 'zip_rlis'
+rlis_zip_field = 'rlis_zip'
 covert_to_string = True
 renameField(rlis_zips, rlis_zip_old_field, rlis_zip_field, True)
 
 or_zip_old_field = 'ZIP'
-or_zip_field = 'zip_or'
+or_zip_field = 'or_zip'
 renameField(oregon_zips, or_zip_old_field, or_zip_field)
 
 tiger_zip_old_field = 'ZCTA5CE10'
@@ -191,23 +202,25 @@ arcpy.analysis.Union(zip_union_feats, zip_union)
 zip_union_clip = 'in_memory/zip_union_clip'
 arcpy.analysis.Clip(zip_union, b_box_fc, zip_union_clip)
 
-# Using the established heirarchy amongst the datasets consolidate all of the zip code value into a single field
-fields = [rlis_zip_field, or_zip_field, tiger_zip_field]
-with arcpy.da.UpdateCursor(zip_union_clip, fields) as cursor:
-	for final_zip, or_zip, tiger_zip in cursor:
-		if final_zip == '':
-			# In the State of Oregon zip code file there are some zips that don't begin with a '9', these seem
-			# to be invalid and are being excluded
-			if or_zip != '' and fnmatch.fnmatch(or_zip, '9*'):
-				final_zip = or_zip
-			elif tiger_zip != '':
-				final_zip = tiger_zip
-
-			cursor.updateRow((final_zip, or_zip, tiger_zip))
-
-# Rename the rlis zip field zip it now contains consolidated values for all zip datasets
+# Add field to store final zip code of for unioned regions
 final_zip_field = 'zip_code'
-renameField(zip_union_clip, rlis_zip_field, final_zip_field)
+f_type = 'TEXT'
+arcpy.management.AddField(zip_union_clip, final_zip_field, f_type)
+
+# Using the established heirarchy amongst the datasets consolidate all of the zip code value into a single field
+fields = [final_zip_field, rlis_zip_field, or_zip_field, tiger_zip_field]
+with arcpy.da.UpdateCursor(zip_union_clip, fields) as cursor:
+	for final_zip, rlis_zip, or_zip, tiger_zip in cursor:
+		if rlis_zip != '':
+			final_zip = rlis_zip
+		# In the State of Oregon zip code file there are some zips that don't begin with a '9', these seem
+		# to be invalid and are being excluded
+		elif or_zip != '' and fnmatch.fnmatch(or_zip, '9*'):
+			final_zip = or_zip
+		elif tiger_zip != '':
+			final_zip = tiger_zip
+
+		cursor.updateRow((final_zip, rlis_zip, or_zip, tiger_zip))
 
 # Dissolve zip code boundaries based on the unified 'zip' field
 zip_final = os.path.join(env.workspace, 'data/or_wa_zip_codes.shp')
