@@ -17,8 +17,24 @@ env.workspace = '//gisstore/gis/PUBLIC/GIS_Projects/Geocoding/TriMet_Geocoder'
 if not os.path.exists(os.path.join(env.workspace, 'temp')):
 	os.makedirs(os.path.join(env.workspace, 'temp'))
 
-# Create a polygon object that represents the bounding box of the OpenStreet Map export that we use here at TriMet
-b_box_coords = [(44.68000, -123.80000), (44.68000, -121.50000), (45.80000, -121.50000), (45.80000, -123.80000)]
+# 0) Create a polygon object that represents the bounding box of the OpenStreet Map export that we use here at TriMet
+
+# The coordinates in the dictionary below are the extent of the bounding box extract from OSM 
+b_box = {'lat_min': 44.68000, 'lat_max': 45.80000, 'lon_min': -123.80000, 'lon_max': -121.50000}
+
+# From the osm extract the entirety of a street segments that has any part of its length in that b-box is included in the
+# output, thus some intersections outside that area persist. To account for the I'm expanding the box by 5% on each side
+lat_span = b_box['lat_max'] - b_box['lat_min']
+lon_span = b_box['lon_max'] - b_box['lon_min']
+
+box_expansion_pct = 0.05
+b_box['lat_min'] -= (box_expansion_pct * lat_span)
+b_box['lat_max'] += (box_expansion_pct * lat_span)
+b_box['lon_min'] -= (box_expansion_pct * lon_span)
+b_box['lon_max'] += (box_expansion_pct * lon_span)
+
+b_box_coords = [(b_box['lat_min'], b_box['lon_min']), (b_box['lat_min'], b_box['lon_max']),
+					(b_box['lat_max'], b_box['lon_max']), (b_box['lat_max'], b_box['lon_min'])]
 
 # To create a polygon objeect one must first create point objects, put them in an arcpy Array and then pass that array
 # to the polygon object constructor
@@ -47,28 +63,35 @@ rlis_counties = '//gisstore/gis/RLIS/BOUNDARY/co_fill.shp'
 or_wa_tiger_counties = os.path.join(env.workspace, 'statewide_data/or_wa_counties_tiger13.shp')
 
 # Rename a field in a shapefile
-def renameField(fc, old_name, new_name):
+def renameField(fc, old_name, new_name, num2str=False):
 	desc = arcpy.Describe(fc)
 	if old_name in [field.name for field in desc.fields]:
 		# As described here http://resources.arcgis.com/en/help/main/10.2/index.html#//018z0000004n000000, not all
 		# values return by the field objects 'type' parameter map to inputs for arcpy, this dictionary corrects
 		field_type_dict = {'Integer': 'LONG', 'String': 'TEXT', 'SmallInteger':'SHORT'}
 
-		for field in desc.fields:
-			if old_name == field.name:
-				if field.type in field_type_dict:
-					f_type = field_type_dict[field.type]
-					break
-				else:
-					f_type = field.type
-					break
+		if num2str == False:
+			for field in desc.fields:
+				if old_name == field.name:
+					if field.type in field_type_dict:
+						f_type = field_type_dict[field.type]
+						break
+					else:
+						f_type = field.type
+						break
+		else:
+			f_type = 'TEXT'
 
 		arcpy.management.AddField(fc, new_name, f_type)
 
 		fields = [old_name, new_name]
 		with arcpy.da.UpdateCursor(fc, fields) as cursor:
 			for o_name, n_name in cursor:
-				n_name = o_name			
+				n_name = o_name
+				
+				if num2str == True:
+					n_name = str(int(n_name))
+
 				cursor.updateRow((o_name, n_name))
 		
 		arcpy.management.DeleteField(fc, old_name)
@@ -135,11 +158,22 @@ arcpy.management.Dissolve(cty_co_union_clip, city_county_final, dissolve_field)
 # 2) Merge zip codes datasets into a single layer
 
 # Assign zip code datasets to variables
-rlis_zips = '//gisstore/gis/RLIS/BOUNDARY/zipcode.shp'
+rlis_zips_read_only = '//gisstore/gis/RLIS/BOUNDARY/zipcode.shp'
 oregon_zips = os.path.join(env.workspace, 'statewide_data/ORE_zipcodes.shp')
 or_wa_tiger_zips = os.path.join(env.workspace, 'statewide_data/or_wa_zip_code_tab_areas_tiger10.shp')
 
+# rlis zips is read only and needs to be modified thus the copy
+rlis_zips = 'in_memory/rlis_zips'
+arcpy.management.CopyFeatures(rlis_zips_read_only, rlis_zips)
+
 # Rename 'name' fields on input datasets so that they are unique amongst each other
+# the rlis zip field is of type int while all other zip data has their corresponding fields as string
+# I'm converting the rlis zip field to string here for compatibility
+rlis_zip_old_field = 'ZIPCODE'
+rlis_zip_field = 'zip_rlis'
+covert_to_string = True
+renameField(rlis_zips, rlis_zip_old_field, rlis_zip_field, True)
+
 or_zip_old_field = 'ZIP'
 or_zip_field = 'zip_or'
 renameField(oregon_zips, or_zip_old_field, or_zip_field)
@@ -158,25 +192,24 @@ zip_union_clip = 'in_memory/zip_union_clip'
 arcpy.analysis.Clip(zip_union, b_box_fc, zip_union_clip)
 
 # Using the established heirarchy amongst the datasets consolidate all of the zip code value into a single field
-rlis_zip_field = 'ZIPCODE'
 fields = [rlis_zip_field, or_zip_field, tiger_zip_field]
 with arcpy.da.UpdateCursor(zip_union_clip, fields) as cursor:
 	for final_zip, or_zip, tiger_zip in cursor:
-		# rlis zips (aka final_zip) are tested for being unpopulated against zero while or_zip and tiger_zip are
-		# tested against and empty string ('') because the former is of type int and the latter two type str
-		# this relates back to the fact that the input rlis zip layer is read-only otherwise I would have recast
-		# its zip field to string
-		if final_zip == 0:
+		if final_zip == '':
 			# In the State of Oregon zip code file there are some zips that don't begin with a '9', these seem
 			# to be invalid and are being excluded
 			if or_zip != '' and fnmatch.fnmatch(or_zip, '9*'):
-				final_zip = int(or_zip)
+				final_zip = or_zip
 			elif tiger_zip != '':
-				final_zip = int(tiger_zip)
+				final_zip = tiger_zip
 
 			cursor.updateRow((final_zip, or_zip, tiger_zip))
 
+# Rename the rlis zip field zip it now contains consolidated values for all zip datasets
+final_zip_field = 'zip_code'
+renameField(zip_union_clip, rlis_zip_field, final_zip_field)
+
 # Dissolve zip code boundaries based on the unified 'zip' field
 zip_final = os.path.join(env.workspace, 'data/or_wa_zip_codes.shp')
-dissolve_field = rlis_zip_field
+dissolve_field = final_zip_field
 arcpy.management.Dissolve(zip_union_clip, zip_final, dissolve_field)
