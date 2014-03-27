@@ -22,7 +22,7 @@ if not os.path.exists(os.path.join(env.workspace, 'temp')):
 # The coordinates in the dictionary below are the extent of the bounding box extract from OSM 
 b_box = {'lat_min': 44.68000, 'lat_max': 45.80000, 'lon_min': -123.80000, 'lon_max': -121.50000}
 
-# From the osm extract the entirety of a street segments that has any part of its length in that b-box is included in the
+# From the osm extract the entirety of a street segment that has any part of its length in that b-box is included in the
 # output, thus some intersections outside that area persist. To account for the I'm expanding the box by 5% on each side
 lat_span = b_box['lat_max'] - b_box['lat_min']
 lon_span = b_box['lon_max'] - b_box['lon_min']

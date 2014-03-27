@@ -4,27 +4,35 @@
 ---------------------------------
 
 --add spatial index on cross streets geometry column
-drop index if exists osm.cross_streets_gx cascade;
-create index cross_streets_gx on osm.cross_streets using GIST(geom);
+drop index if exists osm.cross_streets_gix cascade;
+create index cross_streets_gix on osm.cross_streets using GIST(geom);
 
-alter table osm.cross_streets drop column if exists city cascade;
-alter table osm.cross_streets add city text;
+cluster osm.cross_streets using cross_streets_gix;
+vacuum analyze osm.cross_streets;
 
-update osm.cross_streets as cs
-	set city = coalesce(cty.cityname, '')
-		from load.city cty
-		where ST_Intersects(cs.geom, cty.geom);
+--Assign each address point to a city or county using and aggregated layer that was created in previous
+--steps of this project
+alter table osm.cross_streets drop column if exists region cascade;
+alter table osm.cross_streets add region text;
 
-update osm.cross_streets as cs
-	set city = coalesce('Unincorporated ' || co.county || ' County', '')
-		from load.county co
-		where cs.city = ''
-		and ST_Intersects(cs.geom, co.geom, 4326);
-
-alter table osm.cross_streets drop column if exists zip cascade;
-alter table osm.cross_streets add zip int;
+cluster or_wa_city_county using or_wa_city_county_geom_gist;
+analyze or_wa_city_county;
 
 update osm.cross_streets as cs
-	set zip = coalesce(zc.zipcode, null)
-		from load.zip_code zc
-		where ST_Intersects(cs.geom, zc.geom, 4326);
+	set region = coalesce(reg.reg_name, '')
+		from or_wa_city_county reg
+		where ST_Within(cs.geom, reg.geom);
+
+--Assign each address point a zip code based on an aggregated zip code layer
+alter table osm.cross_streets drop column if exists zip_code cascade;
+alter table osm.cross_streets add zip_code text;
+
+cluster or_wa_zip_codes using or_wa_zip_codes_geom_gist;
+analyze or_wa_zip_codes;
+
+update osm.cross_streets as cs
+	set zip_code = coalesce(zc.zip_code, '')
+		from or_wa_zip_codes zc
+		where ST_Within(cs.geom, zc.geom);
+
+--ran in 777,986 ms (~13 minutes) on 3/26/14
