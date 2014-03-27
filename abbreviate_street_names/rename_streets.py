@@ -50,7 +50,7 @@ class RenameStreets():
             conn.commit()
 
             # step 1b - query database for osm_names/unique row id 
-            q = "SELECT street_1, street_2, oid FROM " + table
+            q = "SELECT street_1, street_2, oid, node_id FROM " + table
             #q += " where osm_name like '%Tom\\'s%' " # for testing minimal set of row updates
             if self.debug:
                 print q
@@ -67,6 +67,7 @@ class RenameStreets():
 
                 street_names = ((rec[0], 's1_'), (rec[1], 's2_'))
                 oid = rec[2]
+                node_id = rec[3]
                 for name, col_prefix in street_names:
                     if name:
                         try:
@@ -80,7 +81,7 @@ class RenameStreets():
 
                         except Exception, e:
                             print "PARSE EXCEPTION: %s: %s" % (e.__class__.__name__, e)
-                            print name, "\n", oid, "\n", data, "\n", sql, "\n\n"
+                            print name, "\n", 'oid: ' + oid, "\n", 'node id: ' + node_id, "\n", data, "\n", sql, "\n\n"
 
                 # step 2d - commit things every so often (and write a tic mark to show things still running)
                 if k % 5000 == 0:
