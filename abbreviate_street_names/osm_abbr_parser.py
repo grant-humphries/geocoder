@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 # Copyright 2011, TriMet
 # Code by Frank Purcell, adapted to this project by Grant Humphries
 #
@@ -7,7 +9,6 @@
 # Python Version: 2.7.5
 #-----------------------------------------
 
-# -*- coding: utf-8 -*-
 import csv
 from pyparsing import *
 
