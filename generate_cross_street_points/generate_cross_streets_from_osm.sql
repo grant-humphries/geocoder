@@ -17,12 +17,12 @@ create temp table named_intersections as
 --node object for each name associated with a node
 create temp table intersection_points as
 	select n.geom, n.id as node_id, wn.way_id, wt.v as name
-		from osm.nodes n, osm.way_nodes wn, osm.way_tags wt
-		where n.id in (select node_id from named_intersections)
-			and n.id = wn.node_id
-			and wn.way_id = wt.way_id
-			and wt.k = 'name'
-		group by n.geom, n.id, wn.way_id, wt.v;
+	from osm.nodes n, osm.way_nodes wn, osm.way_tags wt
+	where n.id in (select node_id from named_intersections)
+		and n.id = wn.node_id
+		and wn.way_id = wt.way_id
+		and wt.k = 'name'
+	group by n.geom, n.id, wn.way_id, wt.v;
 
 --Add alternate names stored in the 'name_1' and 'alt_name' into the intersection_points table
 --From the intersections table grab only node id's that are a part of a way with a 'name_1' tag
@@ -38,12 +38,12 @@ create temp table named_intersections_n1 as
 --Insert points with their 'name_1' names into the intersection_points table
 insert into intersection_points
 	select n.geom, n.id, wn.way_id, wt.v
-		from osm.nodes n, osm.way_nodes wn, osm.way_tags wt
-		where n.id in (select node_id from named_intersections_n1)
-			and n.id = wn.node_id
-			and wn.way_id = wt.way_id
-			and wt.k = 'name_1'
-		group by n.geom, n.id, wn.way_id, wt.v;
+	from osm.nodes n, osm.way_nodes wn, osm.way_tags wt
+	where n.id in (select node_id from named_intersections_n1)
+		and n.id = wn.node_id
+		and wn.way_id = wt.way_id
+		and wt.k = 'name_1'
+	group by n.geom, n.id, wn.way_id, wt.v;
 
 --Repeat the 'name_1' steps for 'alt_name'
 create temp table named_intersections_an as
@@ -57,12 +57,12 @@ create temp table named_intersections_an as
 
 insert into intersection_points
 	select n.geom, n.id, wn.way_id, wt.v
-		from osm.nodes n, osm.way_nodes wn, osm.way_tags wt
-		where n.id in (select node_id from named_intersections_an)
-			and n.id = wn.node_id
-			and wn.way_id = wt.way_id
-			and wt.k = 'alt_name'
-		group by n.geom, n.id, wn.way_id, wt.v;
+	from osm.nodes n, osm.way_nodes wn, osm.way_tags wt
+	where n.id in (select node_id from named_intersections_an)
+		and n.id = wn.node_id
+		and wn.way_id = wt.way_id
+		and wt.k = 'alt_name'
+	group by n.geom, n.id, wn.way_id, wt.v;
 
 create index int_points_way_id_ix on intersection_points using btree(way_id);
 create index int_points_name_ix on intersection_points using btree(name);
@@ -71,14 +71,15 @@ create index int_points_name_ix on intersection_points using btree(name);
 --cross street pairs
 drop table if exists osm.cross_streets cascade;
 create table osm.cross_streets with oids as
-	select ST_Transform(ip1.geom, 2913) as geom, ST_X(ip1.geom) as x, ST_Y(ip1.geom) as y, ip1.node_id, ip1.name as street_1, ip2.name as street_2
-		from intersection_points ip1, intersection_points ip2
-		where ip1.node_id = ip2.node_id
-			and ip1.name not in (select name 
-								from intersection_points
-								where way_id = ip2.way_id )
-		group by ip1.geom, ip1.node_id, ip1.name, ip2.name
-		order by ip1.name, ip2.name;
+	select ST_Transform(ip1.geom, 2913) as geom, ST_X(ST_Transform(ip1.geom, 2913)) as x, 
+		ST_Y(ST_Transform(ip1.geom, 2913)) as y, ip1.node_id, ip1.name as street_1, ip2.name as street_2
+	from intersection_points ip1, intersection_points ip2
+	where ip1.node_id = ip2.node_id
+		and ip1.name not in (select name 
+							from intersection_points
+							where way_id = ip2.way_id )
+	group by ip1.geom, ip1.node_id, ip1.name, ip2.name
+	order by ip1.name, ip2.name;
 
 --Drop temporary tables
 drop table named_intersections;
