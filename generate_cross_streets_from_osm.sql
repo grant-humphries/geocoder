@@ -5,6 +5,7 @@
 
 --Create a list of node id's for all nodes that are a part two or more ways that all have a tag
 --with the key 'name'
+drop table if exists named_intersections cascade;
 create temp table named_intersections as
 	select node_id 
 	from osm.way_nodes wn
@@ -14,9 +15,10 @@ create temp table named_intersections as
 	group by node_id having count(way_id) > 1;
 
 --Grab the node geometry for the all of the nodes in the list created above and create a distinct
---node object for each name associated with a node
+--node object for each name associated with an intesection node
+drop table if exists intersection_points cascade;
 create temp table intersection_points as
-	select n.geom, n.id as node_id, wn.way_id, wt.v as name
+	select n.geom, n.id::text as int_id, wn.way_id, wt.v as name
 	from osm.nodes n, osm.way_nodes wn, osm.way_tags wt
 	where n.id in (select node_id from named_intersections)
 		and n.id = wn.node_id
@@ -24,71 +26,124 @@ create temp table intersection_points as
 		and wt.k = 'name'
 	group by n.geom, n.id, wn.way_id, wt.v;
 
---Add alternate names stored in the 'name_1' and 'alt_name' into the intersection_points table
---From the intersections table grab only node id's that are a part of a way with a 'name_1' tag
-create temp table named_intersections_n1 as
-	select node_id 
-	from named_intersections i
-	where exists (select null 
-					from osm.way_nodes wn, osm.way_tags wt
-					where i.node_id = wn.node_id
-						and wn.way_id = wt.way_id
-						and wt.k = 'name_1');
-
 --Insert points with their 'name_1' names into the intersection_points table
 insert into intersection_points
-	select n.geom, n.id, wn.way_id, wt.v
+	select n.geom, n.id::text, wn.way_id, wt.v
 	from osm.nodes n, osm.way_nodes wn, osm.way_tags wt
-	where n.id in (select node_id from named_intersections_n1)
+	where n.id in (select node_id from named_intersections)
 		and n.id = wn.node_id
 		and wn.way_id = wt.way_id
 		and wt.k = 'name_1'
 	group by n.geom, n.id, wn.way_id, wt.v;
 
---Repeat the 'name_1' steps for 'alt_name'
-create temp table named_intersections_an as
-	select node_id 
-	from named_intersections i
-	where exists (select null 
-					from osm.way_nodes wn, osm.way_tags wt
-					where i.node_id = wn.node_id
-						and wn.way_id = wt.way_id
-						and wt.k = 'alt_name');
-
+--Insert points with their 'alt_name' names
 insert into intersection_points
-	select n.geom, n.id, wn.way_id, wt.v
+	select n.geom, n.id::text, wn.way_id, wt.v
 	from osm.nodes n, osm.way_nodes wn, osm.way_tags wt
-	where n.id in (select node_id from named_intersections_an)
+	where n.id in (select node_id from named_intersections)
 		and n.id = wn.node_id
 		and wn.way_id = wt.way_id
 		and wt.k = 'alt_name'
 	group by n.geom, n.id, wn.way_id, wt.v;
 
+
+--Now intesections that have roundabout at the center and which don't meet at a single point
+--must be added to the intersection point table
+
+--Some rounbabouts are split into pieces, these are merged into a single geomtry below (and
+--unsplit roundabouts are inserted into this table as well)
+drop table if exists merged_roundabouts cascade;
+create temp table merged_roundabouts as 
+	select (ST_Dump(geom)).geom as geom
+		from (select ST_LineMerge(ST_Collect(geom)) as geom
+				from (select wt.way_id, ST_MakeLine(array(select (select geom from osm.nodes n 
+												where n.id = wn.node_id) 
+										from osm.way_nodes wn 
+										where wn.way_id = wt.way_id
+										order by sequence_id)) as geom, v
+			from osm.way_tags wt
+			where k = 'junction'
+				and v = 'roundabout') as roundabout_segs
+		group by v) as collected_roundabouts;
+
+--Find the id's of all ways that share a node with a roundabout and that have a 'name' tags and put
+--them in an array in the same row as the centroid of the roundabout geometry
+drop table if exists roundabout_pts cascade;
+create temp table roundabout_pts with oids as
+	select ST_Centroid(mr.geom) as geom, array_agg(distinct wn.way_id order by wn.way_id) as way_ids
+	from osm.nodes n, osm.way_nodes wn, merged_roundabouts mr
+	where ST_Contains(mr.geom, n.geom)
+		and n.id = wn.node_id
+		and exists (select null from osm.way_tags wt
+						where wt.way_id = wn.way_id
+							and wt.k = 'name')
+	group by mr.geom;
+
+--Create an individual entry for each named street that adjoins a roundabout by dumping the way_id
+--arrays into to individual rows.  However only do so if the arrays have two or more entries (as this
+--ensures that a named cross-street pair exists at the junction) if array contains 1 or fewer entries
+--discard that row
+drop table if exists dumped_roundabout_pts cascade;
+create temp table dumped_roundabout_pts as
+	select geom, oid as roundabout_id, unnest(way_ids) as way_id
+	from roundabout_points rp
+	--the second parameter in the array_length is the dimension to measure, 
+	--these arrays only have one dimension
+	where array_length(way_ids, 1) > 1
+	order by roundabout_id, way_id;
+
+
+--Now that all of the neccessay information has been gathered about the roundabout intersections insert
+--the roundbout intersection points into table with all of the other standard intersection points
+insert into intersection_points
+	--Because there isn't a central point at which all of the streets meet at roundabout intersection
+	--a 'roundabout_id' is being used where standard intersection use osm node id's.  The 'j' is being
+	--appended to the roundabout_id to ensure that it is different from all osm node ids
+	select rp.geom, 'j' || rp.roundabout_id::text , rp.way_id, wt.v
+	from dumped_roundabout_pts rp, osm.way_tags wt
+	where rp.way_id = wt.way_id
+		and wt.k = 'name'
+	group by rp.geom, rp.roundabout_id, rp.way_id, wt.v;
+
+--Add secondary and tertiary names for rounabout intersections to the point table
+insert into intersection_points
+	select rp.geom, 'j' || rp.roundabout_id::text , rp.way_id, wt.v
+	from dumped_roundabout_pts rp, osm.way_tags wt
+	where rp.way_id = wt.way_id
+		and wt.k = 'name_1'
+	group by rp.geom, rp.roundabout_id, rp.way_id, wt.v;
+
+insert into intersection_points
+	select rp.geom, 'j' || rp.roundabout_id::text , rp.way_id, wt.v
+	from dumped_roundabout_pts rp, osm.way_tags wt
+	where rp.way_id = wt.way_id
+		and wt.k = 'alt_name'
+	group by rp.geom, rp.roundabout_id, rp.way_id, wt.v;
+
+
+--Add indices to speed the join below
 create index int_points_way_id_ix on intersection_points using btree(way_id);
 create index int_points_name_ix on intersection_points using btree(name);
 
---Join nodes, if the ways they are from don't share any common names, based on their node id to create 
---cross street pairs
+--Join intersection points, if the ways they map to don't share any common names, based on their
+--intersection id to create cross street pairs
 drop table if exists osm.cross_streets cascade;
 create table osm.cross_streets with oids as
 	select ST_Transform(ip1.geom, 2913) as geom, ST_X(ST_Transform(ip1.geom, 2913)) as x, 
-		ST_Y(ST_Transform(ip1.geom, 2913)) as y, ip1.node_id, ip1.name as street_1, ip2.name as street_2
+		ST_Y(ST_Transform(ip1.geom, 2913)) as y, ip1.int_id, ip1.name as street_1, ip2.name as street_2
 	from intersection_points ip1, intersection_points ip2
-	where ip1.node_id = ip2.node_id
+	where ip1.int_id = ip2.int_id
 		and ip1.name not in (select name 
 							from intersection_points
 							where way_id = ip2.way_id )
-	group by ip1.geom, ip1.node_id, ip1.name, ip2.name
+	group by ip1.geom, ip1.int_id, ip1.name, ip2.name
 	order by ip1.name, ip2.name;
 
 --Drop temporary tables
 drop table named_intersections;
-drop table named_intersections_n1;
-drop table named_intersections_an;
+drop table merged_roundabouts;
+drop table roundabout_pts;
+drop table dumped_roundabout_pts;
 drop table intersection_points;
 
---Ran in 50,466 ms on 3/17/14
-
---After this script runs the following command needs to be executed in order for the table to be further modified
---ALTER TABLE osm.cross_streets OWNER TO tmpublic;
---Note that the command above won't work in the psql window without the semi-colon
+--Ran in 15,192 ms on 7/16/14
