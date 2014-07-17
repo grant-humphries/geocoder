@@ -12,6 +12,7 @@ from arcpy import env
 env.overwriteOutput = True
 env.addOutputsToMap = True
 env.workspace = '//gisstore/gis/PUBLIC/GIS_Projects/Geocoding/TriMet_Geocoder'
+env.outputCoordinateSystem = arcpy.SpatialReference(2913)
 
 # Create a 'temp' folder to store temporary project output (if it doesn't already exist)
 if not os.path.exists(os.path.join(env.workspace, 'temp')):
