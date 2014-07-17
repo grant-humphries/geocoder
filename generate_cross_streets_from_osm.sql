@@ -50,21 +50,27 @@ insert into intersection_points
 --Now intesections that have roundabout at the center and which don't meet at a single point
 --must be added to the intersection point table
 
---Some rounbabouts are split into pieces, these are merged into a single geomtry below (and
+--Assemble segments that are roundabouts from deconstructed osmosis schema
+drop table if exists roundabout_segs cascade;
+create temp table roundabout_segs as
+	select wt.way_id, 
+		ST_MakeLine(array(select (select geom from osm.nodes n 
+									where n.id = wn.node_id) 
+							from osm.way_nodes wn 
+							where wn.way_id = wt.way_id
+							order by sequence_id)) as geom, v
+		from osm.way_tags wt
+		where k = 'junction'
+			and v = 'roundabout';
+
+--Some roundabouts are split into pieces, these are merged into a single geometry below (and
 --unsplit roundabouts are inserted into this table as well)
 drop table if exists merged_roundabouts cascade;
 create temp table merged_roundabouts as 
 	select (ST_Dump(geom)).geom as geom
-		from (select ST_LineMerge(ST_Collect(geom)) as geom
-				from (select wt.way_id, ST_MakeLine(array(select (select geom from osm.nodes n 
-												where n.id = wn.node_id) 
-										from osm.way_nodes wn 
-										where wn.way_id = wt.way_id
-										order by sequence_id)) as geom, v
-			from osm.way_tags wt
-			where k = 'junction'
-				and v = 'roundabout') as roundabout_segs
-		group by v) as collected_roundabouts;
+	from (select ST_LineMerge(ST_Collect(geom)) as geom
+			from roundabout_segs
+			group by v) as collected_roundabouts;
 
 --Find the id's of all ways that share a node with a roundabout and that have a 'name' tags and put
 --them in an array in the same row as the centroid of the roundabout geometry
@@ -75,7 +81,14 @@ create temp table roundabout_pts with oids as
 	where ST_Contains(mr.geom, n.geom)
 		and n.id = wn.node_id
 		and exists (select null from osm.way_tags wt
-						where wt.way_id = wn.way_id
+					where wt.way_id = wn.way_id
+						and wt.k = 'name')
+		--this clause drops any roundabouts for which some or all of their underlying segments are
+		--named.  In these cases the intersection points will be generated using the standard method
+		--Ladd's circle is a prime example of this
+		and not exists (select null from roundabout_segs rs, osm.way_tags wt
+						where ST_Covers(mr.geom, rs.geom)
+							and rs.way_id = wt.way_id
 							and wt.k = 'name')
 	group by mr.geom;
 
@@ -86,7 +99,7 @@ create temp table roundabout_pts with oids as
 drop table if exists dumped_roundabout_pts cascade;
 create temp table dumped_roundabout_pts as
 	select geom, oid as roundabout_id, unnest(way_ids) as way_id
-	from roundabout_points rp
+	from roundabout_pts rp
 	--the second parameter in the array_length is the dimension to measure, 
 	--these arrays only have one dimension
 	where array_length(way_ids, 1) > 1
@@ -140,10 +153,11 @@ create table osm.cross_streets with oids as
 	order by ip1.name, ip2.name;
 
 --Drop temporary tables
-drop table named_intersections;
-drop table merged_roundabouts;
-drop table roundabout_pts;
-drop table dumped_roundabout_pts;
-drop table intersection_points;
+drop table named_intersections cascade;
+drop table roundabout_segs cascade;
+drop table merged_roundabouts cascade;
+drop table roundabout_pts cascade;
+drop table dumped_roundabout_pts cascade;
+drop table intersection_points cascade;
 
 --Ran in 15,192 ms on 7/16/14
