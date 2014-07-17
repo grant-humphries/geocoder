@@ -4,6 +4,7 @@
 #--------------------------------
 
 import os
+import timing
 import fnmatch
 import arcpy
 from arcpy import env
@@ -227,3 +228,5 @@ with arcpy.da.UpdateCursor(zip_union_clip, fields) as cursor:
 zip_final = os.path.join(env.workspace, 'data/or_wa_zip_codes.shp')
 dissolve_field = final_zip_field
 arcpy.management.Dissolve(zip_union_clip, zip_final, dissolve_field)
+
+timing.log('Compilation of jurisdictional data complete')
