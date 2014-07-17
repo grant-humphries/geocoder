@@ -16,10 +16,10 @@ set pg_user=geoserve
 set /p pgpassword="Enter postgres password:"
 
 ::Run script that generates cross street points
-echo "Generating cross street points from OpenStreetMap data"
+echo "Generating cross street points from osmosis'd openstreetmap data"
 
 set x_streets_script=%workspace%\generate_cross_streets_from_osm.sql
-psql -h %pg_host% -d %db_name% -U %pg_user% -f %x_streets_script%
+psql -q -h %pg_host% -d %db_name% -U %pg_user% -f %x_streets_script%
 
 ::Launch python scripts that abbreviate the lengthy OSM versions of street names
 echo "Street name abbreviation starting..."
@@ -45,3 +45,8 @@ shp2pgsql -s %srid% -d -I %data_workspace%\%zips%.shp %zips% | psql -q -h %pg_ho
 
 ::Determine city/county and zip code of x-street points
 echo "Assigning city/county and zip code information to cross street points"
+
+set assign_loc_info_script=%workspace%\add_jursidictional_info\add_city_county_to_xstreet_points.sql
+psql -q -h %pg_host% -d %db_name% -U %pg_user% -f %assign_loc_info_script%
+
+::
