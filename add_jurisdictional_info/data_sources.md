@@ -23,4 +23,4 @@ for Intersection City, County, and Zip Code Attributes.  The bounding box for wh
 | Oregon Spatial Data Library | [Oregon Zip Code Areas](http://spatialdata.oregonexplorer.info/geoportal/catalog/search/resource/details.page?uuid={153112D4-386B-4300-8B06-AD2EC3D84694}) | State of Oregon |
 | TIGER/Line 2013 Shapefiles | [Zip Code Tabulation Areas](http://www.census.gov/cgi-bin/geo/shapefiles2013/main)** | State of Washington |
 
-**Zip Code Tabulation Areas are not the same as zip code areas.  ZCTA's are formulated by looking at Census Blocks and assigning the zip code most common with the Block to the unit then merging any contiguous blocks with the same zip code attribute.  For this reason this data set is only being used when no other data is available.
+**Zip Code Tabulation Areas are not the same as zip code areas.  ZCTA's are formulated by looking at Census Blocks and assigning the zip code most common with the Block to the unit then merging any contiguous blocks within the same zip code attribute.  For this reason this data set is only being used when no other data is available.
