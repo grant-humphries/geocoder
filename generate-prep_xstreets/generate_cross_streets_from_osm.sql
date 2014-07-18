@@ -12,13 +12,17 @@ create temp table named_intersections as
 	where exists (select null from osm.way_tags wt
 					where wn.way_id = wt.way_id
 					and wt.k = 'name')
+		--this clause is neccessary now that the osmosis import brings in trimet rail tracks
+		and exists (select null from osm.way_tags wt
+					where wn.way_id = wt.way_id
+					and wt.k = 'highway')
 	group by node_id having count(way_id) > 1;
 
 --Grab the node geometry for the all of the nodes in the list created above and create a distinct
 --node object for each name associated with an intesection node
 drop table if exists intersection_points cascade;
 create temp table intersection_points as
-	select n.geom, n.id::text as int_id, wn.way_id, wt.v as name
+	select n.geom, n.id::text as xstr_id, wn.way_id, wt.v as name
 	from osm.nodes n, osm.way_nodes wn, osm.way_tags wt
 	where n.id in (select node_id from named_intersections)
 		and n.id = wn.node_id
@@ -143,13 +147,13 @@ create index int_points_name_ix on intersection_points using btree(name);
 drop table if exists osm.cross_streets cascade;
 create table osm.cross_streets with oids as
 	select ST_Transform(ip1.geom, 2913) as geom, ST_X(ST_Transform(ip1.geom, 2913)) as x, 
-		ST_Y(ST_Transform(ip1.geom, 2913)) as y, ip1.int_id, ip1.name as street_1, ip2.name as street_2
+		ST_Y(ST_Transform(ip1.geom, 2913)) as y, ip1.xstr_id, ip1.name as street_1, ip2.name as street_2
 	from intersection_points ip1, intersection_points ip2
-	where ip1.int_id = ip2.int_id
+	where ip1.xstr_id = ip2.xstr_id
 		and ip1.name not in (select name 
 							from intersection_points
 							where way_id = ip2.way_id )
-	group by ip1.geom, ip1.int_id, ip1.name, ip2.name
+	group by ip1.geom, ip1.xstr_id, ip1.name, ip2.name
 	order by ip1.name, ip2.name;
 
 --Drop temporary tables

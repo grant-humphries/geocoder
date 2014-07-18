@@ -4,7 +4,7 @@ setlocal EnableDelayedExpansion
 ::Set workspaces
 set workspace=G:\PUBLIC\GIS_Projects\Geocoding\TriMet_Geocoder
 set code_workspace=%workspace%\git\geocoder
-set data_workspace-%workspace%\data
+set data_workspace=%workspace%\data
 
 ::Set postgres parameters
 set pg_host=maps10.trimet.org
@@ -18,16 +18,18 @@ set /p pgpassword="Enter postgres password:"
 ::Run script that generates cross street points
 echo "Generating cross street points from osmosis'd openstreetmap data"
 
-set x_streets_script=%code_workspace%\generate-prep_xtsreets\generate_cross_streets_from_osm.sql
+set x_streets_script=%code_workspace%\generate-prep_xstreets\generate_cross_streets_from_osm.sql
 psql -q -h %pg_host% -d %db_name% -U %pg_user% -f %x_streets_script%
+
 
 ::Launch python scripts that abbreviate the lengthy OSM versions of street names
 echo "Street name abbreviation starting..."
-echo "Start time is: %time:~0,8%"
-set renamer_script=%code_workspace%\abbreviate_street_names\rename_streets.py
-python %renamer_script%
 
-echo "Street abbreviation completed at: %time:~0,8%"
+::The command prompt must be in the location below for the python renamer to run properly
+call G:
+cd %code_workspace%\abbreviate_street_names
+python rename_streets.py %pgpassword%
+
 
 ::Optionally run arcpy script that numerous jurisdictional datasets into two shapefiles
 set /p update_jurisdictional_data="Has any of the underlying jurisdictional data been updated?  Type 'y' (no quotes) to run script that will integrate that new data, type anything else to skip it"
@@ -46,6 +48,7 @@ shp2pgsql -s %srid% -d -I %data_workspace%\%city_county%.shp %city_county% | psq
 set zips=or_wa_zip_codes
 shp2pgsql -s %srid% -d -I %data_workspace%\%zips%.shp %zips% | psql -q -h %pg_host% -U %pg_user% -d %db_name%
 
+
 ::Determine city/county and zip code of x-street points
 echo "Assigning city/county and zip code information to cross street points"
 echo "Start time is: %time:~0,8%"
@@ -55,22 +58,22 @@ psql -q -h %pg_host% -d %db_name% -U %pg_user% -f %assign_loc_info_script%
 
 echo "Jurisdiction assigment completed at: %time:~0,8%"
 
+
 ::convert cross streets table into schema used by SOLR geocoder (is derived from old data provided by Metro)
 echo "Converting data to SOLR compatible schema"
 
-set conversion_script=%code_workspace%\generate-prep_xtsreets\convert_xstreets_to_solr_schema.sql
+set conversion_script=%code_workspace%\generate-prep_xstreets\convert_xstreets_to_solr_schema.sql
 psql -q -h %pg_host% -d %db_name% -U %pg_user% -f %assign_loc_info_script%
 
 echo "Export to shapefile?  This will move the old version of the file and replace it"
 echo "Press any key to proceed or crtl + c to abort"
 pause
 
-
 set export_location=G:\Data\Metro\intersection
 set shp_name=intersection
 
 ::Get the last modified date from old intersections shapefile
-for %%i in (%rlis_streets_shp%) do (
+for %%i in (%export_location%\%shp_name%.shp) do (
 	rem appending '~t' in front of the variable name in a loop will return the time and date 
 	rem that the file that was assigned to that variable was last modified
 	set mod_date_time=%%~ti
