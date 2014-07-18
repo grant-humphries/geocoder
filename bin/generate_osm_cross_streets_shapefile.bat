@@ -13,7 +13,7 @@ set pg_user=geoserve
 
 ::Prompt the user to enter their postgres password, 'pgpassword' is a keyword and will automatically
 ::set the password for most postgres commands in the current session
-set /p pgpassword="Enter postgres password:"
+set /p pgpassword="Enter postgres password (escape special characters using '^^'):"
 
 ::Run script that generates cross street points
 echo "Generating cross street points from osmosis'd openstreetmap data"
@@ -34,7 +34,7 @@ python rename_streets.py %pgpassword%
 ::Optionally run arcpy script that numerous jurisdictional datasets into two shapefiles
 set /p update_jurisdictional_data="Has any of the underlying jurisdictional data been updated?  Type 'y' (no quotes) to run script that will integrate that new data, type anything else to skip it"
 
-set jurisdiction_compilation_script=%code_workspace%/add_jursidictional_info/compile_jurisdictional_data.py
+set jurisdiction_compilation_script=%code_workspace%\add_jurisdictional_info\compile_jurisdictional_data.py
 if %update_jurisdictional_data%==y python %jurisdiction_compilation_script%
 
 ::Load the jurisdictional shapefiles into postgis
@@ -53,7 +53,7 @@ shp2pgsql -s %srid% -d -I %data_workspace%\%zips%.shp %zips% | psql -q -h %pg_ho
 echo "Assigning city/county and zip code information to cross street points"
 echo "Start time is: %time:~0,8%"
 
-set assign_loc_info_script=%code_workspace%\add_jursidictional_info\add_city_county_to_xstreet_points.sql
+set assign_loc_info_script=%code_workspace%\add_jurisdictional_info\add_cty-co-zip_to_xstreets.sql
 psql -q -h %pg_host% -d %db_name% -U %pg_user% -f %assign_loc_info_script%
 
 echo "Jurisdiction assigment completed at: %time:~0,8%"
@@ -63,10 +63,10 @@ echo "Jurisdiction assigment completed at: %time:~0,8%"
 echo "Converting data to SOLR compatible schema"
 
 set conversion_script=%code_workspace%\generate-prep_xstreets\convert_xstreets_to_solr_schema.sql
-psql -q -h %pg_host% -d %db_name% -U %pg_user% -f %assign_loc_info_script%
+psql -q -h %pg_host% -d %db_name% -U %pg_user% -f %conversion_script%
 
 echo "Export to shapefile?  This will move the old version of the file and replace it"
-echo "Press any key to proceed or crtl + c to abort"
+echo "Press crtl + c to abort or"
 pause
 
 set export_location=G:\Data\Metro\intersection
@@ -90,6 +90,5 @@ for /f %%i in ('dir /b %export_location%\%shp_name%.*') do (
 )
 
 ::Export to now vacated location at which SOLR grabs the data
-set schema=osm
 set export_table=cross_street_export
-pgsql2shp -k -u %pg_user% -P %pgpassword% -h %pg_host% -f %export_location%\%shp_name%.shp %db_name% %scema%.%export_table%
+pgsql2shp -k -u %pg_user% -P %pgpassword% -h %pg_host% -f %export_location%\%shp_name%.shp %db_name% %export_table%
