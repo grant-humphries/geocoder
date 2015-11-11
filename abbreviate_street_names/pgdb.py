@@ -1,5 +1,5 @@
-# Copyright 2012, OpenPlans / TriMet
-# Code by Frank Purcell, OpenPlans adapted to this project by Grant Humphries
+# Code by Frank Purcell, Open Plans (2012) 
+# adapted to this project by Grant Humphries
 #
 # Licensed under the GNU Lesser General Public License 3.0 or any
 # later version. See lgpl-3.0.txt for details.

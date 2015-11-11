@@ -1,5 +1,4 @@
-# Copyright 2011, TriMet
-# Code by Frank Purcell, adapted to this project by Grant Humphries
+# Code by Frank Purcell (2011), adapted to this project by Grant Humphries
 #
 # Licensed under the GNU Lesser General Public License 3.0 or any
 # later version. See lgpl-3.0.txt for details.
